@@ -35,11 +35,11 @@ class DefaultFirebaseOptions {
 
   // Data from google-services.json
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyAjFzxXkd8ejk9YnuhxUU-YnaNepxIEXtk',
-    appId: '1:313112928368:android:ee61df6bf0320ccf23d4b5',
-    messagingSenderId: '313112928368',
-    projectId: 'kitakitar',
-    storageBucket: 'kitakitar.firebasestorage.app',
+    apiKey: 'YOUR_ANDROID_API_KEY_HERE',
+    appId: 'YOUR_ANDROID_APP_ID_HERE',
+    messagingSenderId: 'YOUR_MESSAGING_SENDER_ID_HERE',
+    projectId: 'YOUR_PROJECT_ID_HERE',
+    storageBucket: 'YOUR_STORAGE_BUCKET_HERE',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(

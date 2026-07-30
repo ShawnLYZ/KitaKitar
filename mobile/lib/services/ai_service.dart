@@ -62,6 +62,8 @@ Rules:
         Content.multi([TextPart(_prompt), imagePart]),
       ]);
 
+      _logGeminiResponseMeta(response);
+
       final text = response.text;
       if (text == null || text.isEmpty) {
         debugPrint('[AIService] Gemini returned empty response');
@@ -79,15 +81,55 @@ Rules:
     }
   }
 
+  void _logGeminiResponseMeta(GenerateContentResponse response) {
+    final candidates = response.candidates;
+    if (candidates.isEmpty) {
+      debugPrint(
+        '[AIService] candidates: empty; promptFeedback=${response.promptFeedback}',
+      );
+      return;
+    }
+    final first = candidates.first;
+    debugPrint(
+      '[AIService] finishReason=${first.finishReason}, '
+      'finishMessage=${first.finishMessage}',
+    );
+    final um = response.usageMetadata;
+    if (um != null) {
+      debugPrint(
+        '[AIService] usage tokens: prompt=${um.promptTokenCount}, '
+        'candidates=${um.candidatesTokenCount}, total=${um.totalTokenCount}',
+      );
+    }
+  }
+
+  String _cleanModelJsonText(String text) {
+    return text
+        .replaceAll(RegExp(r'```json\s*'), '')
+        .replaceAll(RegExp(r'\s*```'), '')
+        .trim();
+  }
+
+  /// Logs a long string in chunks so Flutter logcat is not truncated mid-line.
+  void _debugPrintSnippet(String label, String body, {int head = 800, int tail = 400}) {
+    debugPrint('$label (len=${body.length})');
+    if (body.length <= head + tail + 20) {
+      debugPrint(body);
+      return;
+    }
+    debugPrint('--- head (${head}ch) ---');
+    debugPrint(body.substring(0, head));
+    debugPrint('--- tail (${tail}ch) ---');
+    debugPrint(body.substring(body.length - tail));
+  }
+
   ScanResult _parseResponse(String text) {
+    final cleaned = _cleanModelJsonText(text);
     try {
-      final cleaned = text
-          .replaceAll(RegExp(r'```json\s*'), '')
-          .replaceAll(RegExp(r'\s*```'), '')
-          .trim();
       final json = jsonDecode(cleaned) as Map<String, dynamic>;
       final list = json['detectedMaterials'] as List?;
-      final materials = (list ?? [])
+      final rawList = list ?? [];
+      final materials = rawList
           .whereType<Map<String, dynamic>>()
           .map((m) => DetectedMaterial(
                 type: (m['type'] ?? 'other').toString().toLowerCase(),
@@ -96,8 +138,22 @@ Rules:
           .where((m) => m.type.isNotEmpty && m.estimatedWeight > 0)
           .toList();
       final tip = json['preparationTip'] as String?;
-      return ScanResult(materials: materials, preparationTip: tip?.trim().isNotEmpty == true ? tip : null);
-    } catch (_) {
+
+      if (rawList.isNotEmpty && materials.isEmpty) {
+        debugPrint(
+          '[AIService] JSON decoded but all ${rawList.length} detectedMaterials '
+          'entries were dropped (wrong shape, empty type, or weight <= 0).',
+        );
+      }
+
+      return ScanResult(
+        materials: materials,
+        preparationTip: tip?.trim().isNotEmpty == true ? tip : null,
+      );
+    } catch (e, stack) {
+      debugPrint('[AIService] _parseResponse failed: $e');
+      debugPrint('[AIService] stack: $stack');
+      _debugPrintSnippet('[AIService] cleaned model text', cleaned);
       return ScanResult(materials: []);
     }
   }

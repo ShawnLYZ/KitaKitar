@@ -4,30 +4,38 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// (no Cloud Function required). Uses WriteBatch to avoid transaction
 /// "Future already completed" issues on some Flutter/Firestore versions.
 class QRService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  QRService({FirebaseFirestore? firestore})
+      : _firestore = firestore ?? FirebaseFirestore.instance;
+
+  final FirebaseFirestore _firestore;
 
   static const double _baseMultiplier = 100.0;
+  static const double _freeBonus = 1.5;
+  static const double _co2PointsMultiplier = 100.0;
+  static const double _defaultCo2PerKg = 0.5;
 
-  /// CO₂ saved per kg of each material type (kg CO₂ / kg material).
+  /// CO₂ saved per kg of each material type, keyed by material slug
+  /// (the canonical `type` string stored on QR/transaction materials).
   static const Map<String, double> co2Multipliers = {
-    'Paper/Cardboard': 0.65,
-    'Plastics': 0.75,
-    'Glass': 0.30,
-    'Aluminum': 0.95,
-    'Batteries': 0.80,
-    'Electronics': 0.80,
-    'Food': 0.50,
-    'Lawn Materials': 0.40,
-    'Used Oil': 0.70,
-    'Household Hazardous Waste': 0.90,
-    'Tires': 0.60,
-    'Metal': 0.85,
+    'paper': 0.65,
+    'plastic': 0.75,
+    'glass': 0.30,
+    'aluminum': 0.95,
+    'batteries': 0.80,
+    'electronics': 0.80,
+    'food': 0.50,
+    'lawn': 0.40,
+    'used_oil': 0.70,
+    'hazardous_waste': 0.90,
+    'tires': 0.60,
+    'metal': 0.85,
   };
 
-  /// Returns CO₂ saved (kg) for a given material type and weight.
-  static double calcCo2(String materialType, double weightKg) {
-    final multiplier = co2Multipliers[materialType] ?? 0.5;
-    return weightKg * multiplier;
+  /// CO₂ saved (kg) for one material entry: the stored AI estimate when
+  /// present (bin-created docs), otherwise weight × slug multiplier.
+  static double materialCo2(String type, double weightKg, double? storedCo2) {
+    if (storedCo2 != null) return storedCo2;
+    return weightKg * (co2Multipliers[type] ?? _defaultCo2PerKg);
   }
 
   /// Claims a QR code for the current user. Returns points earned.
@@ -56,7 +64,9 @@ class QRService {
       throw Exception('Invalid QR code data');
     }
 
-    int pointsUser = 0;
+    // points = round( Σ [ weight × 100 × (isFree ? 1.5 : 1) + co2 × 100 ] )
+    // where co2 = stored value ?? weight × slug multiplier (0.5 default).
+    double pointsRaw = 0;
     double co2Saved = 0;
     final transactionMaterials = <Map<String, dynamic>>[];
     for (final m in materials) {
@@ -65,16 +75,20 @@ class QRService {
       final type = (map['type'] as String?) ?? '';
       final isFree = map['isFree'] as bool? ?? true;
       final pricePerKg = (map['pricePerKg'] as num?)?.toDouble() ?? 0.0;
-      final pts = (isFree ? weight * _baseMultiplier * 1.5 : weight * _baseMultiplier).round();
-      pointsUser += pts;
-      co2Saved += calcCo2(type, weight);
+      final storedCo2 = (map['co2'] as num?)?.toDouble();
+      final co2 = materialCo2(type, weight, storedCo2);
+      pointsRaw += weight * _baseMultiplier * (isFree ? _freeBonus : 1.0) +
+          co2 * _co2PointsMultiplier;
+      co2Saved += co2;
       transactionMaterials.add({
         'type': type,
         'weight': weight,
         'pricePerKg': pricePerKg,
         'isFree': isFree,
+        if (storedCo2 != null) 'co2': storedCo2,
       });
     }
+    final pointsUser = pointsRaw.round();
     final pointsCenter = pointsUser;
 
     final userRef = _firestore.collection('users').doc(userId);
@@ -85,7 +99,8 @@ class QRService {
     final userData = userDoc.data() ?? {};
     final curPoints = (userData['points'] as num?)?.toInt() ?? 0;
     final curTotalWeight = (userData['totalWeight'] as num?)?.toDouble() ?? 0.0;
-    final curCarbonFootprint = (userData['carbonFootprint'] as num?)?.toDouble() ?? 0.0;
+    final curCarbonFootprint =
+        (userData['carbonFootprint'] as num?)?.toDouble() ?? 0.0;
     final curStats = Map<String, double>.from((userData['stats'] ?? {}) as Map);
     for (final m in transactionMaterials) {
       final type = m['type'] as String? ?? '';
@@ -97,7 +112,8 @@ class QRService {
     final centerData = centerDoc.data() ?? {};
     final cPoints = (centerData['points'] as num?)?.toInt() ?? 0;
     final cTotalWeight = (centerData['totalWeight'] as num?)?.toDouble() ?? 0.0;
-    final cCarbonFootprint = (centerData['carbonFootprint'] as num?)?.toDouble() ?? 0.0;
+    final cCarbonFootprint =
+        (centerData['carbonFootprint'] as num?)?.toDouble() ?? 0.0;
 
     final batch = _firestore.batch();
     batch.update(qrRef, {
