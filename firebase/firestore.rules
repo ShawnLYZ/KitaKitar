@@ -1,10 +1,100 @@
 rules_version = '2';
 
+// Clients may only write what they own. Points, stats, transactions and a
+// QR's `used` flag are written only by the `redeemQr` Cloud Function, which
+// uses the Admin SDK and so bypasses these rules.
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Временные правила для теста: доступ всем аутентифицированным
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(id) {
+      return signedIn() && request.auth.uid == id;
+    }
+
+    // A smart bin is authorized for a center by the doc
+    // centers/{centerId}/bins/{binUid}, created by the center owner.
+    function isBinFor(centerId) {
+      return signedIn() && exists(
+        /databases/$(database)/documents/centers/$(centerId)/bins/$(request.auth.uid));
+    }
+
+    // QR codes are issued by the center itself or one of its bins.
+    function isIssuerFor(centerId) {
+      return isOwner(centerId) || isBinFor(centerId);
+    }
+
+    function changesOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // Reward counters start empty; only redeemQr increments them.
+    function rewardsStartAtZero() {
+      let data = request.resource.data;
+      return data.get('points', 0) == 0
+        && data.get('totalWeight', 0) == 0
+        && data.get('carbonFootprint', 0) == 0
+        && data.get('stats', {}).size() == 0;
+    }
+
+    function isValidNewQr() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['centerId', 'used', 'createdAt', 'transactionDraft'])
+        && data.used == false
+        && data.transactionDraft.materials is list
+        && data.transactionDraft.materials.size() > 0
+        && data.transactionDraft.totalWeight is number
+        && data.transactionDraft.totalWeight > 0;
+    }
+
+    match /users/{userId} {
+      // The leaderboard lists all users.
+      allow read: if signedIn();
+      allow create: if isOwner(userId) && rewardsStartAtZero();
+      allow update: if isOwner(userId)
+        && changesOnly(['name', 'email', 'avatarUrl', 'lastLoginAt']);
+    }
+
+    match /centers/{centerId} {
+      // The map and leaderboard list all centers.
+      allow read: if signedIn();
+      allow create: if isOwner(centerId) && rewardsStartAtZero();
+      allow update: if isOwner(centerId)
+        && changesOnly(['name', 'address', 'location', 'manager']);
+
+      match /materials/{materialId} {
+        allow read: if signedIn();
+        allow write: if isOwner(centerId);
+      }
+
+      match /bins/{binUid} {
+        allow read, write: if isOwner(centerId);
+      }
+    }
+
+    match /qr_codes/{qrId} {
+      // The doc id is the claim token, so only the issuer may read the doc.
+      // A get of a missing doc is allowed so the bin can tell "gone" (404)
+      // apart from a failure.
+      allow get: if signedIn()
+        && (resource == null || isIssuerFor(resource.data.centerId));
+      allow list: if isOwner(resource.data.centerId);
+      allow create: if isIssuerFor(request.resource.data.centerId) && isValidNewQr();
+      // The bin deletes the unclaimed QR it supersedes when merging a session.
+      allow delete: if isIssuerFor(resource.data.centerId) && resource.data.used == false;
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if signedIn()
+        && (resource.data.userId == request.auth.uid
+          || resource.data.centerId == request.auth.uid);
+    }
+
+    match /ai_scans/{scanId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
     }
   }
 }

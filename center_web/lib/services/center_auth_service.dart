@@ -2,9 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 /// Auth layer specifically for recycling centers (web).
 ///
-/// Equivalent of AuthService from mobile, but:
-/// - role `center` instead of `user`;
-/// - without Google Sign-In (according to the description, email+password is enough for the center website).
+/// Equivalent of AuthService from mobile, but without Google Sign-In (according to the description, email+password is enough for the center website).
 class CenterAuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -21,7 +19,6 @@ class CenterAuthService {
         email: email,
         password: password,
       );
-      // TODO: here you can call a cloud function setUserRole(role: 'center')
       return credential;
     } catch (e) {
       rethrow;
@@ -37,7 +34,6 @@ class CenterAuthService {
         email: email,
         password: password,
       );
-      // TODO: set displayName to the center name and call setUserRole('center')
       return credential;
     } catch (e) {
       rethrow;

@@ -101,7 +101,7 @@ class CenterAuthProvider with ChangeNotifier {
   static String _mapAuthError(Object e) {
     final s = e.toString();
     if (s.contains('permission-denied') || s.contains('PERMISSION_DENIED')) {
-      return 'No access to data. Check Firestore rules for center role.';
+      return 'No access to data. Deploy the Firestore rules (README Step 9).';
     }
     if (s.contains('invalid-credential') ||
         s.contains('wrong-password') ||

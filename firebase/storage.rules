@@ -1,9 +1,15 @@
 rules_version = '2';
 
+// Scan photos and avatars are stored under users/{uid}/. The apps display
+// them through download URLs, which carry their own access token, so only
+// the owner needs access through these rules.
 service firebase.storage {
   match /b/{bucket}/o {
-    match /{allPaths=**} {
-      allow read, write: if true;
+    match /users/{userId}/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size < 10 * 1024 * 1024;
     }
   }
 }

@@ -1,338 +1,104 @@
-import * as functions from "firebase-functions";
-import * as admin from "firebase-admin";
+import {initializeApp} from "firebase-admin/app";
+import {FieldValue, getFirestore} from "firebase-admin/firestore";
+import {HttpsError, onCall} from "firebase-functions/v2/https";
+import {computeRedemption, InvalidDraftError} from "./points";
 
-admin.initializeApp();
+initializeApp();
 
-const db = admin.firestore();
-
-type MaterialEntry = {
-  type: string;
-  weight: number;
-  pricePerKg?: number;
-  isFree?: boolean;
-};
-
-type TransactionDraft = {
-  materials: MaterialEntry[];
-  totalWeight: number;
-};
-
-// --- CONFIG ---
-
-// Base multiplier for points per kg (you can change it).
-const BASE_MULTIPLIER = 100;
-
-// --- HELPERS ---
-
-function calculatePoints(materials: MaterialEntry[]): number {
-  let points = 0;
-  for (const m of materials) {
-    const weight = m.weight || 0;
-    const isFree = !!m.isFree;
-    const multiplier = isFree ? BASE_MULTIPLIER * 1.5 : BASE_MULTIPLIER;
-    points += weight * multiplier;
-  }
-  return Math.round(points);
-}
-
-function aggregateStats(
-  stats: Record<string, number> | undefined,
-  materials: MaterialEntry[],
-): Record<string, number> {
-  const result: Record<string, number> = {...(stats || {})};
-  for (const m of materials) {
-    const prev = result[m.type] || 0;
-    result[m.type] = prev + (m.weight || 0);
-  }
-  return result;
-}
-
-// --- HTTP callable: onQrScan ---
+const db = getFirestore();
 
 /**
- * Mobile client calls this function after scanning a QR code.
- * Input:
- *  - qrId: string
+ * Redeems an intake QR for the calling user. This is the only code path that
+ * awards points: firestore.rules block clients from writing points, stats,
+ * transactions, or a QR's `used` flag.
  *
- * Requirements:
- *  - auth is required (role=user)
+ * Input: {qrId}, the doc id from the `KITAKITAR_QR:<qrId>` payload.
+ * Returns: {pointsUser, co2Saved, totalWeight}.
  */
-export const onQrScan = functions.https.onCall(async (data, context) => {
-  const uid = context.auth?.uid;
-  const role = (context.auth?.token as any)?.role;
-
+export const redeemQr = onCall({maxInstances: 10}, async (request) => {
+  const uid = request.auth?.uid;
   if (!uid) {
-    throw new functions.https.HttpsError(
-      "unauthenticated",
-      "User must be authenticated",
-    );
+    throw new HttpsError("unauthenticated", "Please log in to claim Kitar Points.");
   }
 
-  if (role !== "user") {
-    throw new functions.https.HttpsError(
-      "permission-denied",
-      "Only users can redeem QR codes",
-    );
-  }
-
-  const qrId: string | undefined = data?.qrId;
-  if (!qrId) {
-    throw new functions.https.HttpsError(
-      "invalid-argument",
-      "qrId is required",
-    );
+  const qrId: unknown = request.data?.qrId;
+  if (typeof qrId !== "string" || qrId.trim() === "" || qrId.includes("/")) {
+    throw new HttpsError("invalid-argument", "Invalid QR code payload.");
   }
 
   const qrRef = db.collection("qr_codes").doc(qrId);
 
-  try {
-    const result = await db.runTransaction(async (tx) => {
-      const qrSnap = await tx.get(qrRef);
-      if (!qrSnap.exists) {
-        throw new functions.https.HttpsError(
-          "not-found",
-          "QR code not found",
-        );
+  // A transaction (not a batch) so two concurrent claims of the same QR
+  // can't both see `used == false`.
+  return db.runTransaction(async (tx) => {
+    const qrSnap = await tx.get(qrRef);
+    if (!qrSnap.exists) {
+      throw new HttpsError("not-found", "QR code not found");
+    }
+    const qr = qrSnap.data() ?? {};
+    if (qr.used === true) {
+      throw new HttpsError("failed-precondition", "This QR code has already been used");
+    }
+    const centerId: unknown = qr.centerId;
+    if (typeof centerId !== "string" || centerId === "") {
+      throw new HttpsError("failed-precondition", "Invalid QR code");
+    }
+    if (centerId === uid) {
+      throw new HttpsError("permission-denied", "A center can't claim its own QR code");
+    }
+
+    let redemption;
+    try {
+      redemption = computeRedemption(qr.transactionDraft);
+    } catch (e) {
+      if (e instanceof InvalidDraftError) {
+        throw new HttpsError("failed-precondition", e.message);
       }
+      throw e;
+    }
+    const {materials, totalWeight, pointsUser, co2Saved, stats} = redemption;
+    const pointsCenter = pointsUser;
 
-      const qrData = qrSnap.data() as {
-        centerId: string;
-        transactionDraft: TransactionDraft;
-        used: boolean;
-      };
+    const centerRef = db.collection("centers").doc(centerId);
+    const centerSnap = await tx.get(centerRef);
+    if (!centerSnap.exists) {
+      throw new HttpsError("failed-precondition", "Recycling center not found");
+    }
 
-      if (qrData.used) {
-        throw new functions.https.HttpsError(
-          "failed-precondition",
-          "QR code already used",
-        );
-      }
+    const now = FieldValue.serverTimestamp();
+    const statsIncrements: Record<string, FieldValue> = {};
+    for (const [type, weight] of Object.entries(stats)) {
+      statsIncrements[type] = FieldValue.increment(weight);
+    }
 
-      const {centerId, transactionDraft} = qrData;
-      const materials = transactionDraft.materials || [];
-      const totalWeight = transactionDraft.totalWeight || 0;
-
-      const pointsUser = calculatePoints(materials);
-      const pointsCenter = pointsUser; // you can use a different formula
-
-      const transactionRef = db.collection("transactions").doc();
-      const now = admin.firestore.FieldValue.serverTimestamp();
-
-      // Create transaction
-      tx.set(transactionRef, {
-        userId: uid,
-        centerId,
-        materials,
-        totalWeight,
-        pointsUser,
-        pointsCenter,
-        createdAt: now,
-        qrCodeId: qrId,
-      });
-
-      // Update user
-      const userRef = db.collection("users").doc(uid);
-      const userSnap = await tx.get(userRef);
-      const userData = userSnap.data() || {};
-      const userStats = aggregateStats(userData.stats, materials);
-
-      tx.set(
-        userRef,
-        {
-          points: (userData.points || 0) + pointsUser,
-          totalWeight: (userData.totalWeight || 0) + totalWeight,
-          stats: userStats,
-          lastTransactionAt: now,
-        },
-        {merge: true},
-      );
-
-      // Update center
-      const centerRef = db.collection("centers").doc(centerId);
-      const centerSnap = await tx.get(centerRef);
-      const centerData = centerSnap.data() || {};
-
-      tx.set(
-        centerRef,
-        {
-          points: (centerData.points || 0) + pointsCenter,
-          totalWeight: (centerData.totalWeight || 0) + totalWeight,
-          lastTransactionAt: now,
-        },
-        {merge: true},
-      );
-
-      // Mark QR as used
-      tx.update(qrRef, {
-        used: true,
-        usedBy: uid,
-        usedAt: now,
-      });
-
-      return {
-        pointsUser,
-        pointsCenter,
-        totalWeight,
-      };
+    tx.update(qrRef, {
+      used: true,
+      usedBy: uid,
+      usedAt: now,
     });
-
-    return result;
-  } catch (error) {
-    if (error instanceof functions.https.HttpsError) {
-      throw error;
-    }
-    console.error("onQrScan error", error);
-    throw new functions.https.HttpsError(
-      "internal",
-      "Failed to redeem QR code",
-    );
-  }
-});
-
-// --- HTTP callable: createQrForCenter ---
-
-/**
- * Called by the center web admin when creating a new intake.
- * Creates a document in /qr_codes with a draft transaction.
- *
- * Input:
- *  - centerId: string (usually == center uid)
- *  - materials: MaterialEntry[]
- *  - totalWeight: number
- */
-export const createQrForCenter = functions.https.onCall(
-  async (data, context) => {
-    const uid = context.auth?.uid;
-    const role = (context.auth?.token as any)?.role;
-
-    if (!uid) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "Center must be authenticated",
-      );
-    }
-    if (role !== "center") {
-      throw new functions.https.HttpsError(
-        "permission-denied",
-        "Only centers can create QR codes",
-      );
-    }
-
-    const centerId: string = data?.centerId || uid;
-    const materials: MaterialEntry[] = data?.materials || [];
-    const totalWeight: number = data?.totalWeight || 0;
-
-    if (!Array.isArray(materials) || materials.length === 0) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "materials must be a non-empty array",
-      );
-    }
-
-    const qrRef = db.collection("qr_codes").doc();
-    const now = admin.firestore.FieldValue.serverTimestamp();
-
-    await qrRef.set({
+    tx.create(db.collection("transactions").doc(), {
+      userId: uid,
       centerId,
-      transactionDraft: {
-        materials,
-        totalWeight,
-      },
-      used: false,
-      usedBy: null,
+      materials,
+      totalWeight,
+      pointsUser,
+      pointsCenter,
+      co2Saved,
       createdAt: now,
-      usedAt: null,
+      qrCodeId: qrId,
+    });
+    tx.set(db.collection("users").doc(uid), {
+      points: FieldValue.increment(pointsUser),
+      totalWeight: FieldValue.increment(totalWeight),
+      carbonFootprint: FieldValue.increment(co2Saved),
+      stats: statsIncrements,
+    }, {merge: true});
+    tx.update(centerRef, {
+      points: FieldValue.increment(pointsCenter),
+      totalWeight: FieldValue.increment(totalWeight),
+      carbonFootprint: FieldValue.increment(co2Saved),
     });
 
-    return {qrId: qrRef.id};
-  },
-);
-
-// --- TRIGGER: onTransactionCreate (optional extra logic) ---
-
-export const onTransactionCreate = functions.firestore
-  .document("transactions/{transactionId}")
-  .onCreate(async (snap, context) => {
-    const data = snap.data();
-    console.log("New transaction created", context.params.transactionId, data);
-    // Here you can:
-    // - send notifications
-    // - log to BigQuery
-    // - build additional aggregates
+    return {pointsUser, co2Saved, totalWeight};
   });
-
-// --- SCHEDULE: updateLeaderboards ---
-
-export const updateLeaderboards = functions.pubsub
-  .schedule("every 15 minutes")
-  .onRun(async () => {
-    // Example: leaderboard by points for users and centers (all-time)
-    const usersSnap = await db
-      .collection("users")
-      .orderBy("points", "desc")
-      .limit(100)
-      .get();
-
-    const centersSnap = await db
-      .collection("centers")
-      .orderBy("points", "desc")
-      .limit(100)
-      .get();
-
-    const now = admin.firestore.FieldValue.serverTimestamp();
-
-    const usersItems = usersSnap.docs.map((d) => ({
-      id: d.id,
-      points: d.get("points") || 0,
-      totalWeight: d.get("totalWeight") || 0,
-    }));
-
-    const centersItems = centersSnap.docs.map((d) => ({
-      id: d.id,
-      points: d.get("points") || 0,
-      totalWeight: d.get("totalWeight") || 0,
-    }));
-
-    const batch = db.batch();
-
-    const usersLbRef = db.collection("leaderboards").doc("users_all_time");
-    batch.set(usersLbRef, {
-      type: "users",
-      period: "all_time",
-      items: usersItems,
-      updatedAt: now,
-    });
-
-    const centersLbRef = db.collection("leaderboards").doc("centers_all_time");
-    batch.set(centersLbRef, {
-      type: "centers",
-      period: "all_time",
-      items: centersItems,
-      updatedAt: now,
-    });
-
-    await batch.commit();
-  });
-
-// --- SCHEDULE: cleanupExpiredQr ---
-
-export const cleanupExpiredQr = functions.pubsub
-  .schedule("every 24 hours")
-  .onRun(async () => {
-    const cutoff = admin.firestore.Timestamp.fromMillis(
-      Date.now() - 1000 * 60 * 60 * 24 * 7, // 7 days
-    );
-
-    const snap = await db
-      .collection("qr_codes")
-      .where("createdAt", "<", cutoff)
-      .get();
-
-    const batch = db.batch();
-    snap.docs.forEach((doc) => batch.delete(doc.ref));
-    if (!snap.empty) {
-      await batch.commit();
-    }
-  });
-
-
+});

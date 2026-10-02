@@ -122,20 +122,21 @@ class _ScanScreenState extends State<ScanScreen>
         imageQuality: 85,
       );
 
-      if (image == null) return;
-
-      setState(() => _isProcessing = true);
+      if (image == null || !mounted) return;
 
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final userId = authProvider.user?.uid;
       if (userId == null) return;
 
+      setState(() => _isProcessing = true);
+
+      // Analyze first so a failed scan doesn't leave an orphaned upload.
+      final scanResult = await _aiService.detectMaterials(image.path);
+
       final imageUrl = await _storageService.uploadImage(
         File(image.path),
         userId,
       );
-
-      final scanResult = await _aiService.detectMaterials(image.path);
 
       await _firestoreService.saveAiScan(
         userId,
@@ -152,14 +153,22 @@ class _ScanScreenState extends State<ScanScreen>
           'imagePath': image.path,
         });
       }
+    } on AIScanException catch (e) {
+      _showScanError(e.message);
     } catch (e) {
-      if (mounted) {
-        setState(() => _isProcessing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
+      _showScanError('Error: $e');
     }
+  }
+
+  void _showScanError(String message) {
+    if (!mounted) return;
+    setState(() => _isProcessing = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
 
   @override

@@ -169,7 +169,7 @@ class AuthProvider with ChangeNotifier {
   static String _mapAuthError(Object e) {
     final s = e.toString();
     if (s.contains('permission-denied') || s.contains('PERMISSION_DENIED')) {
-      return 'No access to data. Deploy Firestore rules (see FIRESTORE_RULES_FIX.md).';
+      return 'No access to data. Deploy the Firestore rules (README Step 9).';
     }
     if (s.contains('invalid-credential') || s.contains('wrong-password') ||
         s.contains('user-not-found') || s.contains('invalid-email') ||

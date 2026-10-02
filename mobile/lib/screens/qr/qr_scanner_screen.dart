@@ -66,7 +66,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     });
 
     try {
-      final result = await _qrService.scanQRCode(qrId, userId);
+      final result = await _qrService.scanQRCode(qrId);
       final earnedPts = result['pointsUser'] ?? 0;
       final co2 = (result['co2Saved'] as num?)?.toDouble() ?? 0;
 

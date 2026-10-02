@@ -76,3 +76,6 @@ CLAUDE.md
 SPEC-smart-bin-standalone.md
 docs/
 skills-lock.json
+
+# Compiled Cloud Functions output
+firebase/functions/lib/

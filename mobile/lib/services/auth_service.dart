@@ -1,11 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
-  final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
   User? get currentUser => _auth.currentUser;
 
@@ -17,7 +15,6 @@ class AuthService {
         email: email,
         password: password,
       );
-      await _setUserRole('user');
       return credential;
     } catch (e) {
       rethrow;
@@ -39,7 +36,6 @@ class AuthService {
 
       final userCredential =
           await _auth.signInWithCredential(credential);
-      await _setUserRole('user');
       return userCredential;
     } catch (e) {
       rethrow;
@@ -59,7 +55,6 @@ class AuthService {
 
       if (credential.user != null) {
         await credential.user!.updateDisplayName(name);
-        await _setUserRole('user');
       }
 
       return credential;
@@ -82,7 +77,6 @@ class AuthService {
       );
 
       final userCredential = await _auth.signInWithCredential(credential);
-      await _setUserRole('user');
       return userCredential;
     } catch (e) {
       rethrow;
@@ -100,16 +94,6 @@ class AuthService {
       // Google sign-in was never used or already signed out
     }
     await _auth.signOut();
-  }
-
-  Future<void> _setUserRole(String role) async {
-    try {
-      final callable = _functions.httpsCallable('setUserRole');
-      await callable.call({'role': role});
-    } catch (e) {
-      // Role might already be set, ignore error
-      print('Error setting role: $e');
-    }
   }
 }
 

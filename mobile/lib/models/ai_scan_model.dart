@@ -1,3 +1,5 @@
+import 'package:kitakitar_mobile/models/material_types.dart';
+
 class DetectedMaterial {
   final String type;
   final double estimatedWeight;
@@ -15,8 +17,9 @@ class DetectedMaterial {
   }
 
   factory DetectedMaterial.fromMap(Map<String, dynamic> map) {
+    final type = (map['type'] ?? '').toString();
     return DetectedMaterial(
-      type: map['type'] ?? '',
+      type: canonicalMaterialType(type) ?? type,
       estimatedWeight: (map['estimatedWeight'] ?? 0).toDouble(),
     );
   }

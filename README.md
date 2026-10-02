@@ -145,6 +145,7 @@ You only need to do this once on your computer:
 1. Install **Flutter** (the toolkit this app is built with): follow the official instructions for your operating system at https://docs.flutter.dev/get-started/install
 2. Install **Android Studio** (to run the app on an Android phone/emulator): https://developer.android.com/studio
 3. Make sure you have a free **Google account** (the same one you use for Gmail is fine) — you'll use it to create a Firebase project.
+4. Install **Node.js 22** (used to upload KitaKitar's server code to Firebase): https://nodejs.org
 
 ---
 
@@ -401,14 +402,27 @@ The app also works fine with plain Email/Password login, so you can skip this st
 
 ---
 
-## STEP 9 — Set up the database security rules
+## STEP 9 — Deploy the security rules and the points server
 
-Right now your database is in "test mode", which is open to anyone. Let's apply KitaKitar's real rules:
+Right now your database is in "test mode", which is open to anyone. This step locks it down and uploads `redeemQr`, the small piece of server code (a Cloud Function) that awards Kitar Points when someone scans a QR code. The apps are not allowed to change points themselves, so **claiming QR codes won't work until this step is done.**
 
-1. Open `firebase/firestore.rules` in your code editor, select all the text, and copy it.
-2. In Firebase console, go to **Build → Firestore Database → Rules** tab, delete what's there, paste in the copied text, and click **Publish**.
-3. Open `firebase/storage.rules`, copy its contents the same way.
-4. In Firebase console, go to **Build → Storage → Rules** tab, paste it in, and click **Publish**.
+1. **Switch to the Blaze plan** (Cloud Functions require it). In Firebase console, click **Upgrade** in the bottom-left corner and choose **Blaze (pay as you go)**. Blaze still includes Firebase's free monthly allowance, which covers a project of this size; you can set a budget alert on the same screen as a safety net.
+2. Install the Firebase command-line tool and log in (a browser window opens):
+   ```bash
+   npm install -g firebase-tools
+   firebase login
+   ```
+3. Deploy. Replace `YOUR_PROJECT_ID` with the Project ID from Step 5:
+   ```bash
+   cd firebase/functions
+   npm install
+   cd ..
+   firebase deploy --project YOUR_PROJECT_ID --only firestore:rules,storage,functions
+   cd ..
+   ```
+   The first deploy takes a few minutes and may ask to enable some Google Cloud APIs. Answer yes. You should finish with `Deploy complete!`.
+
+Run the same `firebase deploy` command again whenever you change anything in the `firebase/` folder.
 
 ---
 
@@ -473,6 +487,7 @@ Only follow this step if you actually have the ESP32-CAM smart bin hardware buil
 1. **Firebase Auth user for the bin** — Firebase Console → Authentication → Add user (email + password). This is the bin's own identity; revoking it disables the bin without affecting users or centers.
 2. **Firebase Web API key & project ID** — Console → Project settings → General.
 3. **Recycling-center document** — the `centers/{BIN_CENTER_ID}` doc must exist (redemption credits it and fails if it is missing).
+4. **Authorize the bin for that center** — the security rules only let a bin create QR codes for a center that lists it. In Firebase Console → Firestore Database, open the `centers` collection and click your center's document. Click **Start collection**, name it `bins`, set the **Document ID** to the bin's **User UID** (Authentication → Users), add a field `label` (string, e.g. `Smart bin 1`), and click **Save**. To revoke the bin, delete that document.
 4. **Dedicated Gemini API key** — [Google AI Studio](https://aistudio.google.com) → Get API key (do not reuse the mobile app's key).
 
 ### Arduino IDE Setup Guide
@@ -524,7 +539,7 @@ Or from the CLI: `arduino-cli compile --fqbn esp32:esp32:esp32cam smart_bin`.
 | can | `aluminum` | recyclable |
 | residual / unknown | — | residual (no QR) |
 
-Weight and CO₂e are **AI-estimated per item** (clamped to 0.005–3.0 kg and 0–5.0 kg) and stored on the QR document. The app computes points as `round(Σ weight×100×1.5 + co2×100)` at redemption.
+Weight and CO₂e are **AI-estimated per item** (clamped to 0.005–3.0 kg and 0–5.0 kg) and stored on the QR document. When the QR is claimed, the `redeemQr` Cloud Function computes points as `round(Σ weight×100×1.5 + co2×100)`.
 
 ---
 
@@ -532,6 +547,9 @@ Weight and CO₂e are **AI-estimated per item** (clamped to 0.005–3.0 kg and 0
 
 - **App shows "Firebase not configured"** → Double-check every value in `firebase_options.dart` was pasted between the quotes correctly, with no extra spaces, and that you saved the file.
 - **"Permission denied" errors on scans/map** → You probably haven't published the rules yet — redo Step 9.
+- **Scanning a QR code says "QR redemption is not set up on the server yet"** → The `redeemQr` function isn't deployed. Redo Step 9.
+- **Scanning a photo says "AI scanning is not set up"** → `GEMINI_API_KEY` is missing from `mobile/.env` (Step 6). Other scan errors come straight from Gemini (for example an invalid key or exceeded quota). The message tells you which.
+- **Smart bin shows "Save failed"** and Serial Monitor logs `[FS] commit failed: 403` → The bin isn't authorized for its center. Do Smart Bin prerequisite 4.
 - **Map doesn't load / is blank** → Make sure all 4 Google Maps APIs are enabled (Step 7) and the key was pasted in the right file with no typos.
 - **Build fails after pulling new code** → Try:
   ```bash

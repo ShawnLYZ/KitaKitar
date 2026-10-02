@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import 'package:kitakitar_mobile/models/ai_scan_model.dart';
+import 'package:kitakitar_mobile/models/material_types.dart';
 import 'package:kitakitar_mobile/services/firestore_service.dart';
 import 'package:kitakitar_mobile/providers/auth_provider.dart';
 import 'package:kitakitar_mobile/theme/app_theme.dart';
@@ -12,37 +13,6 @@ class ScanHistoryScreen extends StatelessWidget {
   const ScanHistoryScreen({super.key});
 
   static final _dateFormat = DateFormat('dd MMM yyyy, HH:mm');
-
-  String _getMaterialLabel(String type) {
-    switch (type.toLowerCase()) {
-      case 'plastic':
-        return 'Plastic';
-      case 'paper':
-        return 'Paper';
-      case 'glass':
-        return 'Glass';
-      case 'metal':
-        return 'Metal';
-      case 'aluminum':
-        return 'Aluminum';
-      case 'batteries':
-        return 'Batteries';
-      case 'electronics':
-        return 'Electronics';
-      case 'food':
-        return 'Food';
-      case 'cardboard':
-        return 'Cardboard';
-      case 'tires':
-        return 'Tires';
-      case 'used_oil':
-        return 'Used Oil';
-      case 'hazardous':
-        return 'Hazardous';
-      default:
-        return type[0].toUpperCase() + type.substring(1);
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -113,7 +83,7 @@ class ScanHistoryScreen extends StatelessWidget {
             itemBuilder: (context, index) {
               final item = items[index];
               final materialLabels = item.materials
-                  .map((m) => _getMaterialLabel(m.type))
+                  .map((m) => materialLabel(m.type))
                   .join(', ');
 
               return Container(

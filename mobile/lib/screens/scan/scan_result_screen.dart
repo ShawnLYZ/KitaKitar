@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:kitakitar_mobile/models/ai_scan_model.dart';
+import 'package:kitakitar_mobile/models/material_types.dart';
 import 'package:kitakitar_mobile/providers/scan_filters_provider.dart';
 import 'package:kitakitar_mobile/screens/scan/recycling_chat_sheet.dart';
 import 'package:kitakitar_mobile/theme/app_theme.dart';
@@ -28,10 +29,12 @@ class ScanResultScreen extends StatelessWidget {
     'glass': Icons.wine_bar_outlined,
     'metal': Icons.settings_outlined,
     'aluminum': Icons.crop_square_outlined,
-    'cardboard': Icons.inventory_2_outlined,
     'batteries': Icons.battery_full_outlined,
     'electronics': Icons.devices_outlined,
     'food': Icons.restaurant_outlined,
+    'lawn': Icons.grass_outlined,
+    'used_oil': Icons.water_drop_outlined,
+    'hazardous_waste': Icons.warning_amber_outlined,
     'tires': Icons.trip_origin_outlined,
   };
 
@@ -41,27 +44,14 @@ class ScanResultScreen extends StatelessWidget {
     'glass': Color(0xFF00BCD4),
     'metal': Color(0xFF607D8B),
     'aluminum': Color(0xFF9E9E9E),
-    'cardboard': Color(0xFF8D6E63),
     'batteries': Color(0xFFFF9800),
     'electronics': Color(0xFF673AB7),
     'food': Color(0xFF4CAF50),
+    'lawn': Color(0xFF689F38),
+    'used_oil': Color(0xFFFFA000),
+    'hazardous_waste': Color(0xFFE53935),
     'tires': Color(0xFF212121),
   };
-
-  String _getMaterialLabel(String type) {
-    switch (type.toLowerCase()) {
-      case 'plastic':
-        return 'Plastic';
-      case 'paper':
-        return 'Paper';
-      case 'glass':
-        return 'Glass';
-      case 'metal':
-        return 'Metal';
-      default:
-        return type[0].toUpperCase() + type.substring(1);
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -175,7 +165,7 @@ class ScanResultScreen extends StatelessWidget {
                             const SizedBox(width: 14),
                             Expanded(
                               child: Text(
-                                _getMaterialLabel(material.type),
+                                materialLabel(material.type),
                                 style: const TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w600,

@@ -22,8 +22,8 @@
 
 // ═══ Behavior constants ══════════════════════════════════════════════
 
-// Reward estimate shown on the OLED (mirrors mobile QRService; the
-// canonical calculation happens in the app at redemption).
+// Reward estimate shown on the OLED (mirrors firebase/functions/src/points.ts;
+// the canonical calculation happens in the redeemQr Cloud Function).
 #define POINTS_BASE_MULTIPLIER 100.0f
 #define POINTS_FREE_BONUS      1.5f
 #define POINTS_CO2_MULTIPLIER  100.0f

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:kitakitar_mobile/services/maps_service.dart';
 import 'package:kitakitar_mobile/services/firestore_service.dart';
 import 'package:kitakitar_mobile/models/center_model.dart';
+import 'package:kitakitar_mobile/models/material_types.dart';
 import 'package:kitakitar_mobile/providers/scan_filters_provider.dart';
 import 'package:kitakitar_mobile/theme/app_theme.dart';
 
@@ -25,20 +26,7 @@ class _MapScreenState extends State<MapScreen> {
   List<CenterModel> _centers = [];
   BitmapDescriptor? _customPin;
 
-  static const List<Map<String, String>> _materialTypes = [
-    {'type': 'paper', 'label': 'Paper / Cardboard'},
-    {'type': 'plastic', 'label': 'Plastics'},
-    {'type': 'glass', 'label': 'Glass'},
-    {'type': 'aluminum', 'label': 'Aluminum'},
-    {'type': 'batteries', 'label': 'Batteries'},
-    {'type': 'electronics', 'label': 'Electronics'},
-    {'type': 'food', 'label': 'Food'},
-    {'type': 'lawn', 'label': 'Lawn Materials'},
-    {'type': 'used_oil', 'label': 'Used Oil'},
-    {'type': 'hazardous_waste', 'label': 'Household Hazardous Waste'},
-    {'type': 'tires', 'label': 'Tires'},
-    {'type': 'metal', 'label': 'Metal'},
-  ];
+  static const List<Map<String, String>> _materialTypes = kMaterialTypes;
 
   final Map<String, double?> _materialWeights = {
     for (final m in _MapScreenState._materialTypes) m['type']!: null,

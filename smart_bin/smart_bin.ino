@@ -39,7 +39,7 @@ static void clearSession() {
     curUpdateTime = "";
 }
 
-// Display-only estimate mirroring mobile QRService (all bin items isFree).
+// Display-only estimate mirroring redeemQr's formula (all bin items isFree).
 static long estimatePoints() {
     float sum = 0;
     for (int i = 0; i < sessionCount; i++)
